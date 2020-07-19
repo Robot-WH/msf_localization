@@ -1,0 +1,36 @@
+<launch>    
+    <param name="use_sim_time" value="true"/>
+    <!--启动配置好的rviz-->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find msf_localization)/rviz/localization.rviz" />
+
+    <node name="preprocess_node" pkg="msf_localization" type="preprocess_node" output="screen">
+        <param name="downsample_resolution" value="0.5" />
+        <param name="radius_r" value="0.5" /> 
+        <param name="radius_min_neighbors" value="2" />
+        <param name="distance_far_thresh" value="100" /> 
+        <param name="distance_near_thresh" value="1" />
+    </node>
+
+        <!---->
+    <node name="localization_node" pkg="msf_localization" type="localization_node" output="screen">
+        <param name="use_imu" value="true" />
+        <param name="invert_imu" value="true" />
+        <param name="ndt_neighbor_search_method" value="DIRECT7" />
+        <param name="ndt_resolution" value="1.0" />
+        <param name="specify_init_pose" value="true" />
+        <param name="init_pos_x" value="0.0" />
+        <param name="init_pos_y" value="0.0" />
+        <param name="init_pos_z" value="0.0" />
+        <param name="init_ori_w" value="1.0" />
+        <param name="init_ori_x" value="0.0" />
+        <param name="init_ori_y" value="0.0" />
+        <param name="init_ori_z" value="0.0" />
+    </node>
+
+    <node name="MapServer_node" pkg="msf_localization" type="MapServer_node" output="screen">
+        <param name="globalmap_pcd" value="$(find msf_localization)/data/map.pcd" />
+        <param name="downsample_resolution" value="0.5" />
+    </node>
+
+
+</launch>
