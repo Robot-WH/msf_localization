@@ -1,8 +1,0 @@
-Log file created at: 2020/12/29 18:32:16
-Running on machine: mini-Default-string
-Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg
-W1229 18:32:16.507972  6260 initializer.cpp:30] [AddGpsPositionData]: No enought imu data! imu num: 17
-W1229 18:32:16.758649  6260 initializer.cpp:30] [AddGpsPositionData]: No enought imu data! imu num: 42
-W1229 18:32:16.905335  6260 initializer.cpp:30] [AddGpsPositionData]: No enought imu data! imu num: 56
-W1229 18:32:17.106825  6260 initializer.cpp:30] [AddGpsPositionData]: No enought imu data! imu num: 77
-W1229 18:32:17.310796  6260 initializer.cpp:30] [AddGpsPositionData]: No enought imu data! imu num: 97
