@@ -24,7 +24,6 @@
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Path.h>
 
-
 #include <pcl/filters/voxel_grid.h>
 #include <pclomp/ndt_omp.h>
 
@@ -32,6 +31,7 @@
 #include "base_type.h"
 #include "tic_toc.h"
 #include "initializer.h"
+#include "filters/filter.hpp"
 
 using namespace std;
 using namespace MsfLocalization; 
@@ -42,8 +42,10 @@ namespace INS {
 class InsLocalization
 {
   public:
+    
+    InsLocalization() = delete;  
 
-    InsLocalization()
+    InsLocalization(std::shared_ptr<Filter> const& filter)
     {
       nh = ros::NodeHandle("~");       // 初始化私有句柄  
 
@@ -56,6 +58,21 @@ class InsLocalization
       pose_pub_ = nh.advertise<nav_msgs::Odometry>("/odom", 5);
       gps_path_pub_ = nh.advertise<nav_msgs::Path>("/gps_path", 5);
       fused_path_pub_ = nh.advertise<nav_msgs::Path>("/fused_path", 5);
+      
+      double acc_noise, gyro_noise, acc_bias_noise, gyro_bias_noise;    // 设置IMU噪声参数  默认值基本OK 
+      nh.param("acc_noise",       acc_noise, 1e-2);   
+      nh.param("gyro_noise",      gyro_noise, 1e-4);
+      nh.param("acc_bias_noise",  acc_bias_noise, 1e-6);
+      nh.param("gyro_bias_noise", gyro_bias_noise, 1e-8);
+      // GPS, IMU 杆臂误差  
+      double x, y, z;
+      nh.param("I_p_Gps_x", x, 0.);
+      nh.param("I_p_Gps_y", y, 0.);
+      nh.param("I_p_Gps_z", z, 0.);
+      const Eigen::Vector3d I_p_Gps(x, y, z);
+
+      states_estimator_.reset(new StatesEstimator(acc_noise, gyro_noise, acc_bias_noise, gyro_bias_noise,
+                              Eigen::Vector3d(0., 0., -9.81007), filter));  
 
     }
 
@@ -64,7 +81,7 @@ class InsLocalization
     void PublishPath(nav_msgs::Path &path, ros::Publisher &path_pub, Eigen::Vector3d const &P,
                                       Eigen::Quaterniond const &q, string frame_id); 
 
-    void publishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose);
+    void PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose);
 
     void gnssCallback(const sensor_msgs::NavSatFixConstPtr& gps_msg_ptr);
 
@@ -96,7 +113,7 @@ class InsLocalization
     std::queue<ImuData> imu_data_;                          // IMU队列 
     std::queue<GpsPositionData> gps_data_;  
 
-    std::unique_ptr<StatesEstimator<float>> states_estimator_;
+    std::unique_ptr<StatesEstimator> states_estimator_;
     tf::TransformBroadcaster pose_broadcaster_;                // 这个玩意定义在函数内部  不能正常发布tf   直接做为全局变量又会和NodeHandle 冲突
     Initializer ins_init;  
     GeographicLib::LocalCartesian local_cartesian;
@@ -163,7 +180,7 @@ void InsLocalization::PublishPath( nav_msgs::Path &path, ros::Publisher &path_pu
  * @param stamp  timestamp
  * @param pose   odometry pose to be published
  */
-void InsLocalization::publishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose) 
+void InsLocalization::PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose) 
 {
     // broadcast the transform over tf
     geometry_msgs::TransformStamped odom_trans = matrix2tf(stamp, pose, "map", "velodyne");
@@ -295,85 +312,92 @@ void InsLocalization::gnssCallback(const sensor_msgs::NavSatFixConstPtr& gps_msg
 // 状态的预测  是通过 IMU和轮速传感器  完成的 
 void InsLocalization::state_estimate()
 {
-  while(1)
-  { 
-    // 下面的处理 要注意一定要是初始化完成之后
-    if(initialize_)
+    TicToc tt;
+    tt.tic();  
+    while (1)
     {
-      // 如果数据容器容器中包含数据
-      if(!gps_data_.empty()||!imu_data_.empty())
-      {
-        // 找到容器中 时间戳最老的进行处理   
-        int idx = 0;
-        double min_timestamp = 0.;  
-        if (!gps_data_.empty())
+        // 下面的处理 要注意一定要是初始化完成之后
+        if (initialize_)
         {
-          min_timestamp = gps_data_.front().timestamp;
-          idx = 1;  
-        }
-        if (!imu_data_.empty())
-        {
-          if(imu_data_.front().timestamp<min_timestamp)
-          {
-            min_timestamp = imu_data_.front().timestamp;
-            idx = 2;  
-          }
-        }
-       
-        // 当前处理的传感器
-        switch(idx)
-        {
-          case 1:    // 最老的数据是gps
-          {
-            GpsPositionData gps_data = gps_data_.front();
-            gps_data_.pop();  
-            // gps数据执行状态更新
-            states_estimator_->ProcessGPSData(gps_data); 
-            break;
-          }
-          case 2:    // 最老的数据是imu
-          {
-            // 如果初始化没有完成   不处理IMU的数据
-            ImuData imu_data = imu_data_.front();
-            imu_data_.pop();  
-            // imu数据执行预测
-            states_estimator_->ProcessImuData(imu_data);
+            // 如果数据容器容器中包含数据
+            if (!gps_data_.empty() || !imu_data_.empty())
+            {
+                // LOG(INFO) << "imu nums: " << imu_data_.size() << "gps nums: " << gps_data_.size();
+                // 找到容器中 时间戳最老的进行处理
+                int idx = 0;
+                double min_timestamp = numeric_limits<double>::max();
+                if (!gps_data_.empty())
+                {
+                    min_timestamp = gps_data_.front().timestamp;
+                    idx = 1;
+                }
+                if (!imu_data_.empty())
+                {
+                    if (imu_data_.front().timestamp < min_timestamp)
+                    {
+                        min_timestamp = imu_data_.front().timestamp;
+                        idx = 2;
+                    }
+                }
+                // LOG(INFO) << "process interval: " << tt.toc();
+                // 当前处理的传感器
+                switch (idx)
+                {
+                    case 1: // 最老的数据是gps
+                    {
+                        GpsPositionData gps_data = gps_data_.front();
+                        gps_data_.pop();
+                        // gps数据执行状态更新
+                        states_estimator_->ProcessGPSData(gps_data);
+                        break;
+                    }
+                    case 2: // 最老的数据是imu
+                    {
+                        // 如果初始化没有完成   不处理IMU的数据
+                        ImuData imu_data = imu_data_.front();
+                        imu_data_.pop();
+                        // imu数据执行预测
+                        states_estimator_->ProcessImuData(imu_data);
 
-            State &state = states_estimator_->GetCurrentState();  
-            PublishStatePath(fused_path_, fused_path_pub_, state, "origin");
-            break;
-          }
+                        State &state = states_estimator_->GetCurrentState();
+                        PublishStatePath(fused_path_, fused_path_pub_, state, "origin");
+                        break;
+                    }
+                }
+                // tt.tic();  
+            }
         }
-
-      }
-    }
-    else    
-    { 
-      // 有gps数据就初始化       
-      if(!gps_data_.empty())     
-      {
-        // 加锁
-        std::lock_guard<std::mutex> lg_gps(gnss_data_mutex_);  
-        std::lock_guard<std::mutex> lg_imu(imu_data_mutex_);
-        GpsPositionData gps_data = gps_data_.front();
-        gps_data_.pop();
-        State &state = states_estimator_->GetCurrentState();  
-        if (ins_init.InsInitialize(gps_data, imu_data_, state, states_estimator_->last_imu_))
+        else
         {
-            states_estimator_->last_gps_time_ = gps_data.timestamp;
-            // 初始化GPS
-            local_cartesian.Reset(gps_data.lla(0), gps_data.lla(1), gps_data.lla(2));  
-
-            LOG(INFO) << "initialize OK " << std::endl
-                      << "gps time stamp: " << std::setprecision(15) << states_estimator_->last_gps_time_
-                      << "imu time stamp: " << states_estimator_->last_imu_.timestamp
-                      << " P : " << state.P.transpose() << " V: " << state.V.transpose()
-                      << " acc_bias: " << state.acc_bias.transpose() << " gyro_bias : " << state.gyro_bias.transpose()
-                      << " R: " << std::endl
-                      << state.R;  
+            // 有gps数据就初始化
+            if (!gps_data_.empty())
+            {
+                // 加锁
+                std::lock_guard<std::mutex> lg_gps(gnss_data_mutex_);
+                std::lock_guard<std::mutex> lg_imu(imu_data_mutex_);
+                GpsPositionData gps_data = gps_data_.front();
+                gps_data_.pop();
+                State &state = states_estimator_->GetCurrentState();
+                if (ins_init.InsInitialize(gps_data, imu_data_, state, states_estimator_->last_imu_))
+                {
+                    states_estimator_->last_gps_time_ = gps_data.timestamp;
+                    // 初始化GPS
+                    local_cartesian.Reset(gps_data.lla(0), gps_data.lla(1), gps_data.lla(2));
+                    initialize_ = true;
+                    LOG(INFO) << "initialize OK " << std::endl
+                              << "gps time stamp: " << std::setprecision(15) << states_estimator_->last_gps_time_
+                              << "imu time stamp: " << states_estimator_->last_imu_.timestamp
+                              << " P : " << state.P.transpose() << " V: " << state.V.transpose()
+                              << " acc_bias: " << state.acc_bias.transpose() << " gyro_bias : " << state.gyro_bias.transpose()
+                              << " R: " << std::endl
+                              << state.R << std::endl
+                              << "imu nums: " << imu_data_.size() << "gps nums: " << gps_data_.size();
+                }
+            }
         }
-      }
-    }
+        // 延时
+        std::chrono::milliseconds dura(1);
+        std::this_thread::sleep_for(dura);
   }
 }
 
@@ -384,14 +408,15 @@ using namespace INS;
 
 int main(int argc, char **argv)
 {
-    FLAGS_log_dir = " "; 
+    FLAGS_log_dir = "/home/mini/code/localization_ws/src/msf_localization/LOG"; 
     google::InitGoogleLogging(argv[0]);
     FLAGS_alsologtostderr = 1;  //打印到日志同时是否打印到控制台 
 
     ros::init (argc, argv, "localization_node");   
-    ROS_INFO("Started Lidar MsfLocalization node");   
+    ROS_INFO("Started Lidar MsfLocalization node");
 
-    InsLocalization InsLocalization{}; 
+    std::shared_ptr<Filter> filter(new eskf());
+    InsLocalization InsLocalization{filter};
     // ros::spin();                       // 单线程调用回调函数     
     ros::MultiThreadedSpinner spinner(2); // 多线程回调函数    Use 4 threads 
     std::thread process{&InsLocalization::state_estimate, &InsLocalization};      // 类成员函数 作为线程函数  

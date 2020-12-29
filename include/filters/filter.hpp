@@ -12,13 +12,13 @@
 
 namespace MsfLocalization{
 
-    class filter
+    class Filter
     {
         public:
-        filter()
+        Filter()
         {}
 
-        virtual ~filter()
+        virtual ~Filter()
         {}
         
         // 使用IMU进行预测

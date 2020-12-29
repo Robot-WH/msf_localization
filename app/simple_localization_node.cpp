@@ -128,7 +128,7 @@ class msfLocalization
 
     pcl::Registration<PointT, PointT>::Ptr registration_;      // 匹配方法  
     pcl::PointCloud<PointT>::Ptr Matched_map_;
-    std::unique_ptr<StatesEstimator<float>> states_estimator_;
+    std::unique_ptr<StatesEstimator> states_estimator_;
     tf::TransformBroadcaster pose_broadcaster_;                // 这个玩意定义在函数内部  不能正常发布tf   直接做为全局变量又会和NodeHandle 冲突   
 
     Eigen::Matrix4f Lidar2Imu_;       // LIDAR - IMU 外参 
@@ -207,28 +207,6 @@ void msfLocalization::publishOdometry(const ros::Time& stamp, const Eigen::Matri
     pose_pub_.publish(odom);
 }
 
-// 发布当前的状态 
-void msfLocalization::pubLatestOdometry(double const& t)
-{
-    nav_msgs::Odometry odometry;
-    odometry.header.stamp = ros::Time(t);
-    odometry.header.frame_id = "world";
-    Eigen::Vector3d P = states_estimator_->GetP(); 
-    Eigen::Quaterniond Q = states_estimator_->GetQ();
-    Eigen::Vector3d V = states_estimator_->GetV();
-    odometry.pose.pose.position.x = P.x();
-    odometry.pose.pose.position.y = P.y();
-    odometry.pose.pose.position.z = P.z();
-    odometry.pose.pose.orientation.x = Q.x();
-    odometry.pose.pose.orientation.y = Q.y();
-    odometry.pose.pose.orientation.z = Q.z();
-    odometry.pose.pose.orientation.w = Q.w();
-    odometry.twist.twist.linear.x = V.x();
-    odometry.twist.twist.linear.y = V.y();
-    odometry.twist.twist.linear.z = V.z();
-    pub_latest_odometry_.publish(odometry);
-}
-  
 
 /**
  * @brief 点云的回调函数 
@@ -351,7 +329,7 @@ void msfLocalization::imuCallback(const sensor_msgs::ImuConstPtr& imu_msg)
       //states_estimator_->StatesForwardPropagation(linear_acceleration, angular_velocity, dt);  
       std_msgs::Header header = imu_msg->header;
       header.frame_id = "world";
-      pubLatestOdometry(header.stamp.toSec()); // 发布里程计信息，发布频率很高（与IMU数据同频），每次获取IMU数据都会及时进行更新，而且发布的是当前的里程计信息。
+      // pubLatestOdometry(header.stamp.toSec()); // 发布里程计信息，发布频率很高（与IMU数据同频），每次获取IMU数据都会及时进行更新，而且发布的是当前的里程计信息。
       // 还有一个pubOdometry()函数，似乎也是发布里程计信息， 有延迟，而且频率也不高（至多与激光同频）
     }
     else   // 如果没有初始化   那么要保证 imu_data 中的测量数量不超过100个 

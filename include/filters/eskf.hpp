@@ -6,7 +6,7 @@
 namespace MsfLocalization{
 
 // eskf 融合的实现  
-class eskf : public filter
+class eskf : public Filter
 {
     public:
         eskf()

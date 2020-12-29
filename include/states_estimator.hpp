@@ -27,18 +27,15 @@ using namespace std;
 /**
  * @brief 滤波器状态估计类 
  */
-template<typename T>
 class StatesEstimator 
 {
 public:
-  using PointT = pcl::PointXYZI;
-  typedef Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> MatrixXt;
-  typedef Eigen::Matrix<T, Eigen::Dynamic, 1> VectorXt;
+
   typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixXd;
   
   StatesEstimator(double const& acc_noise, double const& gyro_noise, double const& acc_bias_noise, 
                   double const& gyro_bias_noise, Eigen::Vector3d const gravity, 
-                  std::shared_ptr<filter> const& filter) 
+                  std::shared_ptr<Filter> const& filter) 
   : filter_(filter), acc_noise_(acc_noise), gyro_noise_(gyro_noise), acc_bias_noise_(acc_bias_noise), 
     gyro_bias_noise_(gyro_bias_noise),  gravity_(gravity)
   {
@@ -181,22 +178,7 @@ public:
     // imu_integration_->predict(angular_velocity, linear_acceleration, tmp_P_, tmp_V_, tmp_Q_, tmp_Ba_, tmp_Bg_, dt);
   }
 
-  Eigen::Vector3d const& GetP()
-  {
-    return tmp_P_;  
-  }
 
-  Eigen::Quaterniond const& GetQ()
-  {
-    return tmp_Q_;  
-  }
-
-  Eigen::Vector3d const& GetV()
-  {
-    return tmp_V_;  
-  }
-  
-  
   // 获取状态  可写
   State& GetCurrentState()
   {
@@ -206,35 +188,6 @@ public:
 
 protected:
 
-
-  /* getters */
-  // 获取ukf的预测位置
-  Eigen::Vector3f pos() const 
-  {
-
-    return Eigen::Vector3f(mean[0], mean[1], mean[2]);
-  }
-   
-  Eigen::Vector3f vel() const 
-  {
-
-    return Eigen::Vector3f(mean[3], mean[4], mean[5]);
-  }
-  // 获取UKF的预测姿态
-  Eigen::Quaternionf quat() const 
-  {
-
-    return Eigen::Quaternionf(mean[6], mean[7], mean[8], mean[9]).normalized();
-  }
-
-  Eigen::Matrix4f matrix() const 
-  {
-    Eigen::Matrix4f m = Eigen::Matrix4f::Identity();
-    m.block<3, 3>(0, 0) = quat().toRotationMatrix();
-    m.block<3, 1>(0, 3) = pos();
-    return m;
-  }
-
 public:
   double last_gps_time_; 
   ImuData last_imu_;
@@ -243,19 +196,10 @@ private:
   ros::Time init_stamp;         // when the estimator was initialized
   ros::Time prev_stamp;         // when the estimator was updated last time
   double cool_time_duration_;   // 冷却时间 
-  VectorXt mean;
 
-  std::shared_ptr<filter> filter_; 
-  // 当前里程计信息
-  Eigen::Vector3d tmp_P_;
-  Eigen::Quaterniond tmp_Q_;
-  Eigen::Vector3d tmp_V_;
-  State state_;                 // 当前状态 
-  // 当前零偏   
-  Eigen::Vector3d tmp_Ba_, tmp_Bg_;
-  
-  pcl::Registration<PointT, PointT>::Ptr registration_;
-
+  std::shared_ptr<Filter> filter_;
+  // 维护当前的状态 
+  State state_;
   // 参数
   // IMU相关
   double const acc_noise_, gyro_noise_;                    // 测量噪声 
