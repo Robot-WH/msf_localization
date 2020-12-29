@@ -1,0 +1,17 @@
+<launch>    
+    <param name="use_sim_time" value="true"/>
+    <!--启动配置好的rviz-->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find msf_localization)/rviz/localization.rviz" />
+
+    
+    <!--           -->
+    <node name="ins_localization_node" pkg="msf_localization" type="ins_localization_node" output="screen">
+    </node>
+
+    <!--启动GPS数据转换-->
+    <node name="nmea_topic_driver" pkg="nmea_navsat_driver" type="nmea_topic_driver">
+       <remap from="/fix" to="/GNSS_data"/>
+    </node>
+
+
+</launch>

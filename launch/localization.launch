@@ -11,9 +11,10 @@
         <param name="distance_near_thresh" value="1" />
     </node>
 
-        <!---->
-    <node name="localization_node" pkg="msf_localization" type="localization_node" output="screen">
+    <!--           -->
+    <node name="simple_localization_node" pkg="msf_localization" type="simple_localization_node" output="screen">
         <param name="use_imu" value="true" />
+        <param name="use_gnss" value="true" />
         <param name="invert_imu" value="true" />
         <param name="ndt_neighbor_search_method" value="DIRECT7" />
         <param name="ndt_resolution" value="1.0" />
@@ -30,6 +31,11 @@
     <node name="MapServer_node" pkg="msf_localization" type="MapServer_node" output="screen">
         <param name="globalmap_pcd" value="$(find msf_localization)/data/map.pcd" />
         <param name="downsample_resolution" value="0.5" />
+    </node>
+
+    <!--启动GPS数据转换-->
+    <node name="nmea_topic_driver" pkg="nmea_navsat_driver" type="nmea_topic_driver">
+       <remap from="/fix" to="/GNSS_data"/>
     </node>
 
 

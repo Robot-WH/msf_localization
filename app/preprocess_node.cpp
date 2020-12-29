@@ -51,7 +51,6 @@ ros::Publisher pub_bounding_boxs;
 pcl::Filter<PointT>::Ptr downsample_filter;         // 降采样滤波器对象
 pcl::Filter<PointT>::Ptr outlier_removal_filter;    // 离群点滤波对象
 
-
 /*********** 全局参数  *********************/
 bool floor_remove_enable = false;   // 去地面 
 
@@ -71,7 +70,7 @@ pcl::PointCloud<PointT>::Ptr fullCloud;
 std::vector<std::pair<uint8_t, uint8_t> > neighborIterator;
 
 
-#define use_fast_segmentation 0
+#define use_fast_segmentation 1
 #define N_SCANS 32
 
 // 雷达模型 最底层激光scan的角度  
@@ -950,7 +949,6 @@ void cloudSegmentation(std_msgs::Header cloud_header_, pcl::PointCloud<PointT>::
                   box.bounding_box_.header = cloud_header_;
                   obj_list.push_back(box);
                 }    
-                  
             }
         }
     }
@@ -1041,7 +1039,6 @@ void laser_callback(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
     output.header.frame_id = laserCloudMsg->header.frame_id;
     // cout<<"frame_id: "<<output.header.frame_id<<endl;
     points_pub.publish(output);
-    
 }
 
 

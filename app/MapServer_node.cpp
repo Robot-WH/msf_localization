@@ -25,26 +25,26 @@ pcl::PointCloud<PointT>::Ptr Matched_map;      // 保存地图
 
 // 初始地图发布    
 void initializeMap_pub(ros::NodeHandle& n) {
-// read globalmap from a pcd file
-std::string globalmap_pcd = n.param<std::string>("globalmap_pcd", "");
-cout<<"global map pcd: "<<globalmap_pcd<<endl;
-Matched_map.reset(new pcl::PointCloud<PointT>());
-pcl::io::loadPCDFile(globalmap_pcd, *Matched_map);               // 读取PCD到 globalmap 文件  
-cout<<"map raw size: "<<Matched_map->size()<<endl;
+   // read globalmap from a pcd file
+   std::string globalmap_pcd = n.param<std::string>("globalmap_pcd", "");
+   cout<<"global map pcd: "<<globalmap_pcd<<endl;
+   Matched_map.reset(new pcl::PointCloud<PointT>());
+   pcl::io::loadPCDFile(globalmap_pcd, *Matched_map);               // 读取PCD到 globalmap 文件  
+   cout<<"map raw size: "<<Matched_map->size()<<endl;
 
-Matched_map->header.frame_id = "map";                              // 设定地图坐标系  
-// downsample globalmap    对地图执行降采样  
-double downsample_resolution = n.param<double>("downsample_resolution", 0.1);
-boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
-voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
-voxelgrid->setInputCloud(Matched_map);
-pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
-voxelgrid->filter(*filtered);
-Matched_map = filtered;
-cout<<"map after filter size: "<<Matched_map->size()<<endl;
-map_pub.publish(Matched_map);
+   Matched_map->header.frame_id = "map";                              // 设定地图坐标系  
+   // downsample globalmap    对地图执行降采样  
+   double downsample_resolution = n.param<double>("downsample_resolution", 0.1);
+   boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
+   voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
+   voxelgrid->setInputCloud(Matched_map);
+   pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
+   voxelgrid->filter(*filtered);
+   Matched_map = filtered;
+   cout<<"map after filter size: "<<Matched_map->size()<<endl;
+   map_pub.publish(Matched_map);
 }
-
+      
 
 int main(int argc, char **argv)
 {
@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     int i=0;
     while (ros::ok())
     {           
-    r.sleep();
+       r.sleep();
     }
     return 0;
 }

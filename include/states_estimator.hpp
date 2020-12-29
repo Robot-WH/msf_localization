@@ -1,6 +1,7 @@
 #ifndef STATES_ESTIMATOR_HPP
 #define STATES_ESTIMATOR_HPP
 
+#include <iostream>
 #include <memory>
 #include <ros/ros.h>
 #include <pcl/point_types.h>
@@ -9,19 +10,48 @@
 #include <pclomp/ndt_omp.h>
 #include <pcl/filters/voxel_grid.h>
 
+#include <glog/logging.h>
+
 #include <System_kinematics.hpp>
-#include <ukf.hpp>
-#include <ekf.hpp>
+
+#include "filters/filter.hpp"
+#include "filters/eskf.hpp"
+#include "filters/ukf.hpp"
+#include "base_type.h"
+
+
+namespace MsfLocalization {
+
+using namespace std; 
 
 /**
- * @brief scan matching-based pose estimator
+ * @brief 滤波器状态估计类 
  */
 template<typename T>
-class StatesEstimator {
+class StatesEstimator 
+{
 public:
   using PointT = pcl::PointXYZI;
   typedef Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> MatrixXt;
   typedef Eigen::Matrix<T, Eigen::Dynamic, 1> VectorXt;
+  typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> MatrixXd;
+  
+  StatesEstimator(double const& acc_noise, double const& gyro_noise, double const& acc_bias_noise, 
+                  double const& gyro_bias_noise, Eigen::Vector3d const gravity, 
+                  std::shared_ptr<filter> const& filter) 
+  : filter_(filter), acc_noise_(acc_noise), gyro_noise_(gyro_noise), acc_bias_noise_(acc_bias_noise), 
+    gyro_bias_noise_(gyro_bias_noise),  gravity_(gravity)
+  {
+    // 状态初始化
+    state_.timestamp = 0.0;
+    state_.P = {0.0, 0.0, 0.0};
+    state_.V = {0.0, 0.0, 0.0};
+    state_.R = Eigen::Matrix3d::Zero();
+    state_.acc_bias = {0.0, 0.0, 0.0};
+    state_.gyro_bias = {0.0, 0.0, 0.0};
+    state_.cov = MatrixXd::Zero(15,15);
+  }
+
   /**
    * @brief constructor
    * @param registration        registration method   即NDT
@@ -30,11 +60,13 @@ public:
    * @param quat                initial orientation   初始旋转
    * @param cool_time_duration  during "cool time", prediction is not performed
    */
+  /*
   StatesEstimator(pcl::Registration<PointT, PointT>::Ptr& registration, const ros::Time& stamp, const Eigen::Vector3f& pos, const Eigen::Quaternionf& quat, double cool_time_duration = 1.0)
     : init_stamp(stamp),
-      registration(registration),
-      cool_time_duration(cool_time_duration)
+      registration_(registration),
+      cool_time_duration_(cool_time_duration)
   {
+    /*
     // 状态噪声的协方差矩阵     16*16
     process_noise = Eigen::MatrixXf::Identity(16, 16);    // 单位阵
     process_noise.middleRows(0, 3) *= 1.0;                // 位置P的噪声方差
@@ -66,114 +98,172 @@ public:
     ukf.reset(new UnscentedKalmanFilter<T, PoseSystem>(system, 16, 6, 7, process_noise, control_noise, measurement_noise, mean, cov));
     // 初始化ekf         初始位姿初始化       
     ekf.reset(new ExtendedKalmanFilter<T>(mean, cov));
-  //  ekf.reset(new kkl::alg::ExtendedKalmanFilter<float>());
+    //  ekf.reset(new kkl::alg::ExtendedKalmanFilter<float>());
+    
   }
-
+  */
+  
   /**
-   * @brief predict  根据IMU测得的加速度与角速度来预测
+   * @brief 处理IMU数据  
+   * @details 用IMU数据进行预测 
    * @param stamp    timestamp
    * @param acc      acceleration
    * @param gyro     angular velocity
-   */
-  void predict(const ros::Time& stamp, const Eigen::Vector3f& acc, const Eigen::Vector3f& gyro) {
-    if((stamp - init_stamp).toSec() < cool_time_duration || prev_stamp.is_zero() || prev_stamp == stamp) {
-      prev_stamp = stamp;
-      return;
+  */
+  bool ProcessImuData(ImuData const& cur_imu)
+  {
+    LOG(INFO) << "imu predict !!  curr time: " << std::setprecision(15) << cur_imu.timestamp; 
+    // 如果上一个处理的imu的时间 < 上一个处理的GPS数据  说明上一个处理的数据是GPS  需要插值出GPS时间处IMU的数据
+    if(last_gps_time_>last_imu_.timestamp)
+    {
+      if(cur_imu.timestamp <= last_gps_time_)
+      {
+        last_imu_ = cur_imu;
+        return false;  
+      }
+      //插值
+      // 时间戳的对应关系如下图所示：
+      //                                            current_time         t
+      // *               *               *               *               *     （IMU数据）
+      //                                                          |            （ 数据）
+      //
+      LOG(INFO) << "pre imu data time: " << std::setprecision(15) << last_imu_.timestamp;  
+      LOG(INFO) << "last_gps_time_: " << std::setprecision(15) << last_gps_time_;  
+
+      double dt_1 = last_gps_time_ - last_imu_.timestamp;    
+      double dt_2 = cur_imu.timestamp - last_gps_time_;
+
+      LOG(INFO) << "curr imu acc: " << cur_imu.acc.transpose() << " curr imu gyro: " << cur_imu.gyro.transpose() << std::endl
+                << "last imu acc: " << last_imu_.acc.transpose() << " last imu gyro: " << last_imu_.gyro.transpose() << std::endl; 
+      // 计算插值系数       这么来算    dx + (cx - dx)*dt_1/(dt_1+dt_2)
+      double w1 = dt_2 / (dt_1 + dt_2);
+      double w2 = dt_1 / (dt_1 + dt_2);
+      // 插值出img处imu的近似值
+      last_imu_.acc = w1 * last_imu_.acc + w2 * cur_imu.acc;
+      last_imu_.gyro = w1 * last_imu_.gyro + w2 * cur_imu.gyro;
+      last_imu_.timestamp = last_gps_time_;
+      
+      LOG(INFO) << "interpolation imu acc: " << last_imu_.acc.transpose() << " gyro: " << last_imu_.gyro.transpose();  
     }
-    // 计算前后时间间隔
-    double dt = (stamp - prev_stamp).toSec();
-    prev_stamp = stamp;
-
-    ukf->setProcessNoiseCov(process_noise * dt);    // 返回过程噪声    process_noise的单位是s  
-    ukf->system.dt = dt;
-    //ekf->dt = dt;
-    //ekf->setProcessNoiseCov(dt);
-
-    Eigen::VectorXf control(6);
-    control.head<3>() = acc;
-    control.tail<3>() = gyro;
-    
-    mean = ukf->predict_simple(control);
-    //mean = ukf->predict_ext(control);
-    //ukf->predict_markvo(control);
-    //mean = ekf->predict(control);
+    // 调用滤波器的IMU预测环节 
+    filter_->PredictByImu(last_imu_, cur_imu, state_, gravity_, acc_noise_, gyro_noise_, acc_bias_noise_, gyro_bias_noise_);
+    last_imu_ = cur_imu;  
+    //LOG(INFO) << "IMU predict ! P: " << state_.P.transpose();
   }
 
   /**
-   * @brief correct    校正过程  
-   * @param cloud   input cloud
-   * @return cloud aligned to the globalmap
-   */
-  pcl::PointCloud<PointT>::Ptr correct(const pcl::PointCloud<PointT>::ConstPtr& cloud) {
-    Eigen::Matrix4f init_guess = Eigen::Matrix4f::Identity();
-    // 设定预测值
-    init_guess.block<3, 3>(0, 0) = quat().toRotationMatrix();
-    init_guess.block<3, 1>(0, 3) = pos();
-
-    pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-    registration->setInputSource(cloud);
-    registration->align(*aligned, init_guess);
-    // 获取NDT匹配的结果
-    Eigen::Matrix4f trans = registration->getFinalTransformation();
-    // 提取平移
-    Eigen::Vector3f p = trans.block<3, 1>(0, 3);
-    // 提取旋转
-    Eigen::Quaternionf q(trans.block<3, 3>(0, 0));
-    // coeffs()即获取四元数的 m_coeffs 即 (x,y,z,w )   x.dot(y) = y^t*x    预测的旋转点乘激光观测的结果 
-    if(quat().coeffs().dot(q.coeffs()) < 0.0f) {
-      q.coeffs() *= -1.0f;
-    }
-    // 设定观测值
-    Eigen::VectorXf observation(7);
-    observation.middleRows(0, 3) = p;
-    observation.middleRows(3, 4) = Eigen::Vector4f(q.w(), q.x(), q.y(), q.z());
-
-    // 执行校正步骤
-    //mean = ukf->correct_simple(observation);
-    //ukf->correct_markvo(observation);    
-    mean = ukf->correct(observation);      // hdl原装校正
-    //mean = ekf->correct(observation);
-    return aligned;
+   * @brief 处理GPS数据  
+   * @details 用GPS数据进行校正 
+   * @param stamp    timestamp
+  */
+  bool ProcessGPSData(GpsPositionData const& gps_data)
+  {
+    LOG(INFO) << " GPS correct!!  timestamp: "<< std::setprecision(15) << gps_data.timestamp;  
+    filter_->UpdateByGps(gps_data, state_);
+    last_gps_time_ = gps_data.timestamp;   // 记录当前GPS数据时间
+    //LOG(INFO) << "GPS correct ! P: " << state_.P.transpose();
   }
+
+  /**
+   * @brief 处理激光数据  
+   * @details 用激光数据进行校正 
+   * @param stamp    timestamp
+  */
+  bool ProcessLidarData()
+  {
+  }
+
+
+    // 通过IMU去进行  前向传播   
+  void StatesForwardPropagation( Eigen::Vector3d const& angular_velocity, Eigen::Vector3d const& linear_acceleration, double const& dt)
+  { 
+    // 调用IMU运动模型计算 
+    // imu_integration_->predict(angular_velocity, linear_acceleration, tmp_P_, tmp_V_, tmp_Q_, tmp_Ba_, tmp_Bg_, dt);
+  }
+
+  Eigen::Vector3d const& GetP()
+  {
+    return tmp_P_;  
+  }
+
+  Eigen::Quaterniond const& GetQ()
+  {
+    return tmp_Q_;  
+  }
+
+  Eigen::Vector3d const& GetV()
+  {
+    return tmp_V_;  
+  }
+  
+  
+  // 获取状态  可写
+  State& GetCurrentState()
+  {
+    return state_; 
+  }
+
+
+protected:
+
 
   /* getters */
   // 获取ukf的预测位置
-  Eigen::Vector3f pos() const {
+  Eigen::Vector3f pos() const 
+  {
 
     return Eigen::Vector3f(mean[0], mean[1], mean[2]);
   }
    
-  Eigen::Vector3f vel() const {
+  Eigen::Vector3f vel() const 
+  {
 
     return Eigen::Vector3f(mean[3], mean[4], mean[5]);
   }
   // 获取UKF的预测姿态
-  Eigen::Quaternionf quat() const {
+  Eigen::Quaternionf quat() const 
+  {
 
     return Eigen::Quaternionf(mean[6], mean[7], mean[8], mean[9]).normalized();
   }
 
-  Eigen::Matrix4f matrix() const {
+  Eigen::Matrix4f matrix() const 
+  {
     Eigen::Matrix4f m = Eigen::Matrix4f::Identity();
     m.block<3, 3>(0, 0) = quat().toRotationMatrix();
     m.block<3, 1>(0, 3) = pos();
     return m;
   }
 
+public:
+  double last_gps_time_; 
+  ImuData last_imu_;
+    
 private:
   ros::Time init_stamp;         // when the estimator was initialized
   ros::Time prev_stamp;         // when the estimator was updated last time
-  double cool_time_duration;    //
-  VectorXt mean;  
-  Eigen::MatrixXf process_noise;
-  Eigen::MatrixXf control_noise;       // 控制信号的噪声
-  std::unique_ptr<UnscentedKalmanFilter<float, PoseSystem>> ukf; 
-  std::unique_ptr<ExtendedKalmanFilter<float>> ekf; 
+  double cool_time_duration_;   // 冷却时间 
+  VectorXt mean;
 
-  pcl::Registration<PointT, PointT>::Ptr registration;
+  std::shared_ptr<filter> filter_; 
+  // 当前里程计信息
+  Eigen::Vector3d tmp_P_;
+  Eigen::Quaterniond tmp_Q_;
+  Eigen::Vector3d tmp_V_;
+  State state_;                 // 当前状态 
+  // 当前零偏   
+  Eigen::Vector3d tmp_Ba_, tmp_Bg_;
+  
+  pcl::Registration<PointT, PointT>::Ptr registration_;
+
+  // 参数
+  // IMU相关
+  double const acc_noise_, gyro_noise_;                    // 测量噪声 
+  double const acc_bias_noise_, gyro_bias_noise_;          // 随机游走噪声 
+  Eigen::Vector3d const gravity_;                          // 重力 
 };
 
-
+} // namespace MsfLocalization 
 
 #endif 
 

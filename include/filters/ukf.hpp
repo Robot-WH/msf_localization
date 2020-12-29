@@ -225,7 +225,7 @@ public:
     MatrixXt sigma = MatrixXt::Zero(N , K);
     for (int i = 0; i < ext_sigma_points.rows(); i++) {
       // N+K × 1  
-   //   auto diffA = (ext_sigma_points.row(i).transpose() - ext_mean_pred);
+      // auto diffA = (ext_sigma_points.row(i).transpose() - ext_mean_pred);
       auto diffA = (ext_sigma_points.row(i).transpose().topLeftCorner(N, 1) - mean);
       // K  
       auto diffB = (expected_measurements.row(i).transpose() - expected_measurement_mean);
@@ -389,9 +389,6 @@ public:
     return mean;
   }
   
-
- 
-
   /*			getter			*/
   const VectorXt& getMean() const { return mean; }
   const MatrixXt& getCov() const { return cov; }
@@ -471,7 +468,7 @@ private:
    * @param cov  covariance matrix
    */
   void ensurePositiveFinite(MatrixXt& cov) {
-    return;
+    // return;
     const double eps = 1e-9;
     
     Eigen::EigenSolver<MatrixXt> solver(cov);
