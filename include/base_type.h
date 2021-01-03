@@ -7,11 +7,11 @@
 namespace MsfLocalization {
 // IMU数据结构 
 struct ImuData {
-    double timestamp;      // In second.
+    double timestamp = 0.;      // In second.
 
-    Eigen::Vector3d acc;   // Acceleration in m/s^2
-    Eigen::Vector3d gyro;  // Angular velocity in radian/s.
-    Eigen::Quaterniond rotate;  
+    Eigen::Vector3d acc = {0., 0., 0.};   // Acceleration in m/s^2
+    Eigen::Vector3d gyro = {0., 0., 0.};  // Angular velocity in radian/s.
+    Eigen::Quaterniond rotate = {0., 0., 0., 0.};  
 };
 
 using ImuDataPtr = std::shared_ptr<ImuData>;

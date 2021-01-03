@@ -53,11 +53,10 @@ class InsLocalization
       gps_sub_ = nh.subscribe("/GNSS_data", 200, &InsLocalization::gnssCallback, this);
       
       // 状态发布
-      
       // estimate_state_pub_ = nh.advertise<nav_msgs::Odometry>("/odom", 5, false);
       pose_pub_ = nh.advertise<nav_msgs::Odometry>("/odom", 5);
       gps_path_pub_ = nh.advertise<nav_msgs::Path>("/gps_path", 5);
-      fused_path_pub_ = nh.advertise<nav_msgs::Path>("/fused_path", 5);
+      fused_path_pub_ = nh.advertise<nav_msgs::Path>("/fused_Path", 5);
       
       double acc_noise, gyro_noise, acc_bias_noise, gyro_bias_noise;    // 设置IMU噪声参数  默认值基本OK 
       nh.param("acc_noise",       acc_noise, 1e-2);   
@@ -81,7 +80,7 @@ class InsLocalization
     void PublishPath(nav_msgs::Path &path, ros::Publisher &path_pub, Eigen::Vector3d const &P,
                                       Eigen::Quaterniond const &q, string frame_id); 
 
-    void PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose);
+    void PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose, string &frame, string &sub_frame);
 
     void gnssCallback(const sensor_msgs::NavSatFixConstPtr& gps_msg_ptr);
 
@@ -124,7 +123,6 @@ class InsLocalization
     bool initialize_ = false;
 
     double last_imu_t_ = 0.;  
-
 };
 
 void InsLocalization::PublishStatePath( nav_msgs::Path &path, ros::Publisher &path_pub, State &state, string frame_id) 
@@ -180,23 +178,23 @@ void InsLocalization::PublishPath( nav_msgs::Path &path, ros::Publisher &path_pu
  * @param stamp  timestamp
  * @param pose   odometry pose to be published
  */
-void InsLocalization::PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose) 
+void InsLocalization::PublishOdometry(const ros::Time& stamp, const Eigen::Matrix4f& pose, string &frame, string &sub_frame) 
 {
     // broadcast the transform over tf
-    geometry_msgs::TransformStamped odom_trans = matrix2tf(stamp, pose, "map", "velodyne");
+    geometry_msgs::TransformStamped odom_trans = matrix2tf(stamp, pose, frame, sub_frame);
     pose_broadcaster_.sendTransform(odom_trans);
 
     // publish the transform
     nav_msgs::Odometry odom;
     odom.header.stamp = stamp;
-    odom.header.frame_id = "map";
+    odom.header.frame_id = frame;
 
     odom.pose.pose.position.x = pose(0, 3);
     odom.pose.pose.position.y = pose(1, 3);
     odom.pose.pose.position.z = pose(2, 3);
     odom.pose.pose.orientation = odom_trans.transform.rotation;
 
-    odom.child_frame_id = "velodyne";
+    odom.child_frame_id = sub_frame;
     odom.twist.twist.linear.x = 0.0;
     odom.twist.twist.linear.y = 0.0;
     odom.twist.twist.angular.z = 0.0;
@@ -413,7 +411,7 @@ int main(int argc, char **argv)
     FLAGS_alsologtostderr = 1;  //打印到日志同时是否打印到控制台 
 
     ros::init (argc, argv, "localization_node");   
-    ROS_INFO("Started Lidar MsfLocalization node");
+    ROS_INFO("Started Lidar MsfLocalization node --fix bug1");
 
     std::shared_ptr<Filter> filter(new eskf());
     InsLocalization InsLocalization{filter};

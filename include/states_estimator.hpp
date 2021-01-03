@@ -108,14 +108,15 @@ public:
    * @param gyro     angular velocity
   */
   bool ProcessImuData(ImuData const& cur_imu)
-  {
-    LOG(INFO) << "imu predict !!  curr time: " << std::setprecision(15) << cur_imu.timestamp; 
+  { 
+    /*
+    // 不知道为啥用插值的方式 对于utbm数据集效果不好  
     // 如果上一个处理的imu的时间 < 上一个处理的GPS数据  说明上一个处理的数据是GPS  需要插值出GPS时间处IMU的数据
     if(last_gps_time_>last_imu_.timestamp)
     {
       if(cur_imu.timestamp <= last_gps_time_)
       {
-        last_imu_ = cur_imu;
+        LOG(WARNING) << "imu time no sync! curr imu time < last imu time! ";
         return false;  
       }
       //插值
@@ -142,6 +143,16 @@ public:
       
       LOG(INFO) << "interpolation imu acc: " << last_imu_.acc.transpose() << " gyro: " << last_imu_.gyro.transpose();  
     }
+    */
+    
+    // 检查时间戳  
+    if(cur_imu.timestamp <= last_gps_time_ || cur_imu.timestamp <= last_imu_.timestamp)
+    {
+      LOG(WARNING) << "imu time no sync! curr imu time < last imu time! ";
+      return false;  
+    }
+    
+    LOG(INFO) << "imu predict !!  curr time: " << std::setprecision(15) << cur_imu.timestamp;  
     // 调用滤波器的IMU预测环节 
     filter_->PredictByImu(last_imu_, cur_imu, state_, gravity_, acc_noise_, gyro_noise_, acc_bias_noise_, gyro_bias_noise_);
     last_imu_ = cur_imu;  
@@ -155,9 +166,14 @@ public:
   */
   bool ProcessGPSData(GpsPositionData const& gps_data)
   {
-    LOG(INFO) << " GPS correct!!  timestamp: "<< std::setprecision(15) << gps_data.timestamp;  
+    if(gps_data.timestamp < last_imu_.timestamp)
+    {
+      LOG(WARNING) << "GPS time no sync! < last imu time! ";
+      return false;  
+    }
+    LOG(INFO) << " GPS correct!!  timestamp: " << std::setprecision(15) << gps_data.timestamp;
     filter_->UpdateByGps(gps_data, state_);
-    last_gps_time_ = gps_data.timestamp;   // 记录当前GPS数据时间
+    last_gps_time_ = gps_data.timestamp; // 记录当前GPS数据时间
     //LOG(INFO) << "GPS correct ! P: " << state_.P.transpose();
   }
 

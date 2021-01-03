@@ -29,7 +29,8 @@ class eskf : public Filter
          */
         bool PredictByImu(ImuData const& last_imu, ImuData const& cur_imu, State &state, Eigen::Vector3d const& gravity,
                           double const& acc_noise, double const& gyro_noise, double const& acc_bias_noise, double const& gyro_bias_noise) 
-        {
+        {   
+            
             // Time.   两个IMU的时间差    
             const double delta_t = cur_imu.timestamp - last_imu.timestamp;
             const double delta_t2 = delta_t * delta_t;
@@ -48,7 +49,7 @@ class eskf : public Filter
             }
             // 中值加速度
             const Eigen::Vector3d acc_unbias = 
-                        0.5 * ( last_state.R * (last_imu.acc - last_state.acc_bias) + state.R * (cur_imu.acc - last_state.acc_bias));
+                        0.5 * (last_state.R * (last_imu.acc - last_state.acc_bias) + state.R * (cur_imu.acc - last_state.acc_bias));
             // 速度 
             state.V = last_state.V + (acc_unbias + gravity) * delta_t;
             // 位移 
@@ -87,6 +88,58 @@ class eskf : public Filter
             // Time and imu.
             state.timestamp = cur_imu.timestamp;
             // state.imu_data_ptr = cur_imu;
+            
+            /*
+            // Time.   两个IMU的时间差    
+            const double delta_t = cur_imu.timestamp - last_imu.timestamp;
+            const double delta_t2 = delta_t * delta_t;
+
+            // Set last state.
+            State last_state = state;
+
+            // Acc and gyro.    IMU测量信息取均值    
+            const Eigen::Vector3d acc_unbias = 0.5 * (last_imu.acc + cur_imu.acc) - last_state.acc_bias;
+            const Eigen::Vector3d gyro_unbias = 0.5 * (last_imu.gyro + cur_imu.gyro) - last_state.gyro_bias;
+
+            // Normal state.     PVQ的更新      欧拉法  
+            // Using P58. of "Quaternion kinematics for the error-state Kalman Filter".
+            state.P = last_state.P + last_state.V * delta_t + 
+                        0.5 * (last_state.R * acc_unbias + gravity) * delta_t2;
+            state.V = last_state.V + (last_state.R * acc_unbias + gravity) * delta_t;
+            const Eigen::Vector3d delta_angle_axis = gyro_unbias * delta_t;     // (wm - wb)*dt  
+            if (delta_angle_axis.norm() > 1e-12) {
+                state.R = last_state.R * Eigen::AngleAxisd(delta_angle_axis.norm(), delta_angle_axis.normalized()).toRotationMatrix();
+            }
+            // error state 的预测均值为0   
+
+            // Covariance of the error-state.   协方差
+            // Fx     
+            Eigen::Matrix<double, 15, 15> Fx = Eigen::Matrix<double, 15, 15>::Identity();
+            Fx.block<3, 3>(0, 3)   = Eigen::Matrix3d::Identity() * delta_t;
+            Fx.block<3, 3>(3, 6)   = - state.R * GetSkewMatrix(acc_unbias) * delta_t;
+            Fx.block<3, 3>(3, 9)   = - state.R * delta_t;
+            if (delta_angle_axis.norm() > 1e-12) {   // 轴角 -> 旋转矩阵   
+                Fx.block<3, 3>(6, 6) = Eigen::AngleAxisd(delta_angle_axis.norm(), delta_angle_axis.normalized()).toRotationMatrix().transpose();
+            } else {
+                Fx.block<3, 3>(6, 6).setIdentity();
+            }
+            Fx.block<3, 3>(6, 12)  = - Eigen::Matrix3d::Identity() * delta_t;
+            // Fi
+            Eigen::Matrix<double, 15, 12> Fi = Eigen::Matrix<double, 15, 12>::Zero();
+            Fi.block<12, 12>(3, 0) = Eigen::Matrix<double, 12, 12>::Identity();
+            
+            Eigen::Matrix<double, 12, 12> Qi = Eigen::Matrix<double, 12, 12>::Zero();
+            Qi.block<3, 3>(0, 0) = delta_t2 * acc_noise * Eigen::Matrix3d::Identity();
+            Qi.block<3, 3>(3, 3) = delta_t2 * gyro_noise * Eigen::Matrix3d::Identity();
+            Qi.block<3, 3>(6, 6) = delta_t * acc_bias_noise * Eigen::Matrix3d::Identity();
+            Qi.block<3, 3>(9, 9) = delta_t * gyro_bias_noise * Eigen::Matrix3d::Identity();
+            // 求得IMU预测量的 协方差 
+            state.cov = Fx * last_state.cov * Fx.transpose() + Fi * Qi * Fi.transpose();
+
+            // Time and imu.
+            state.timestamp = cur_imu.timestamp;
+            // state->imu_data_ptr = cur_imu;
+            */
         }
 
         // 对于轮速进行预测
@@ -107,13 +160,13 @@ class eskf : public Filter
             // GPS残差   gps的观测值 - 预测值    3x1 
             residual = gps_data.enu - state.P;            
             computeJacobianOfGPS(H, state.R);             // 计算观测的jacobian H 
-            const Eigen::Matrix3d& V = gps_data.cov;      // 观测噪声   3x3   
+            const Eigen::Matrix3d& V = gps_data.cov * 1;      // 观测噪声   3x3   
             const Eigen::MatrixXd& P = state.cov;         // 预测量的 协方差    15x15
             // 15 x 3
             const Eigen::MatrixXd K = P * H.transpose() * (H * P * H.transpose() + V).inverse();  // 卡尔曼增益  和预测协方差P与观测协方差 V 有关 
             // 15 x 1
             const Eigen::VectorXd delta_x = K * residual;    // 计算error state   注意 预测状态的均值一直为0    所以不需要+error_state
-
+            // LOG(INFO) << "delta_x : ---------------------------------" << std::endl << delta_x.transpose();
             // Add delta_x to state.   将error state更新到状态中
             addErrorToNominal(delta_x, state);
 
@@ -134,7 +187,8 @@ class eskf : public Filter
         // 对于GPS的观测  计算观测jacobian与观测残差 
         // GPS的观测为 XYZ
         void computeJacobianOfGPS(Eigen::Matrix<double, 3, 15> &jacobian, Eigen::Matrix3d const& pose)
-        {
+        {   
+            
             Eigen::Matrix<double, 3, 16> dev_x = Eigen::Matrix<double, 3, 16>::Zero();
             dev_x.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity();
 
